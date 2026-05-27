@@ -2,12 +2,9 @@ name: Build iOS IPA
 
 on:
   push:
-    branches:
-      - claude/bluetooth-chat-feasibility-c9qGx
-      - main
+    branches: [claude/bluetooth-chat-feasibility-c9qGx, main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   build-ios:
@@ -24,32 +21,24 @@ jobs:
       - name: Install JS dependencies
         run: npm install
 
-      # react-native init generates the Xcode project we can't commit as binary via API.
-      # Using the same app name so xcodeproj paths align with our Info.plist.
+      # Bootstrap Xcode project using the CLI version that ships with RN 0.76
       - name: Bootstrap iOS Xcode project
         run: |
-          npx react-native@0.76 init BluetoothChat \
+          npx @react-native-community/cli@14 init BluetoothChat \
             --directory /tmp/rn-scaffold \
-            --skip-install
-
+            --skip-install \
+            --version 0.76.5
           cp -r /tmp/rn-scaffold/ios/BluetoothChat.xcodeproj ios/
-
-          # Copy AppDelegate and LaunchScreen; keep our Info.plist (has BLE permissions)
           for f in AppDelegate.swift AppDelegate.mm LaunchScreen.storyboard; do
-            [ -e "/tmp/rn-scaffold/ios/BluetoothChat/$f" ] && \
-              cp "/tmp/rn-scaffold/ios/BluetoothChat/$f" "ios/BluetoothChat/" || true
+            src="/tmp/rn-scaffold/ios/BluetoothChat/$f"
+            [ -f "$src" ] && cp "$src" ios/BluetoothChat/ || true
           done
-
-          # Test target is referenced in xcodeproj
-          [ -d "/tmp/rn-scaffold/ios/BluetoothChatTests" ] && \
+          [ -d /tmp/rn-scaffold/ios/BluetoothChatTests ] && \
             cp -r /tmp/rn-scaffold/ios/BluetoothChatTests ios/ || true
 
       - name: Install CocoaPods
         working-directory: ios
         run: pod install
-
-      - name: Install xcpretty
-        run: gem install xcpretty --no-document
 
       - name: Build archive (no code signing)
         run: |
@@ -62,9 +51,9 @@ jobs:
             -archivePath "$RUNNER_TEMP/BluetoothChat.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            archive | xcpretty
+            archive 2>&1 | tee /tmp/xcodebuild.log | grep -E '^(error:|warning:|Build|Compiling|Linking|Archive)' || \
+            { tail -50 /tmp/xcodebuild.log; exit 1; }
 
-      # Package .app into Payload/*.ipa structure (standard IPA layout)
       - name: Package as IPA
         run: |
           APP=$(find "$RUNNER_TEMP/BluetoothChat.xcarchive" -name "*.app" | head -1)
