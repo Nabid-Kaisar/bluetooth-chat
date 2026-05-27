@@ -1,0 +1,44 @@
+#!/bin/sh
+# Gradle start-up script for UN*X
+APP_NAME="Gradle"
+APP_BASE_NAME=$(basename "$0")
+APP_HOME=$(cd "$(dirname "$0")" && pwd -P)
+
+DEFAULT_JVM_OPTS='"--add-opens=java.base/java.util=ALL-UNNAMED" "--add-opens=java.base/java.io=ALL-UNNAMED" "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED" "--add-opens=java.base/java.net=ALL-UNNAMED" "--add-opens=java.base/java.nio=ALL-UNNAMED" "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED" "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED" "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED" "-Dfile.encoding=UTF-8" "-Duser.country=US" "-Duser.language=en" "-Duser.variant"'
+
+exec "$APP_HOME/gradlew" "$@"
+
+set -e
+die () {
+    echo
+    echo "ERROR: $*"
+    echo
+    exit 1
+} >&2
+
+warn () {
+    echo "$*"
+} >&2
+
+JAVA_HOME_CANDIDATES=""
+if [ -n "$JAVA_HOME" ] ; then
+    JAVA_HOME_CANDIDATES="$JAVA_HOME"
+fi
+
+for candidate in $JAVA_HOME_CANDIDATES ; do
+    if [ -f "$candidate/bin/java" ] ; then
+        JAVACMD="$candidate/bin/java"
+        break
+    fi
+done
+
+if [ -z "$JAVACMD" ] ; then
+    JAVACMD=java
+    which java >/dev/null 2>&1 || die "ERROR: JAVA_HOME is not set and no 'java' command could be found."
+fi
+
+exec "$JAVACMD" $DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS \
+    "-Dorg.gradle.appname=$APP_BASE_NAME" \
+    -classpath "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" \
+    org.gradle.wrapper.GradleWrapperMain \
+    "$@"
