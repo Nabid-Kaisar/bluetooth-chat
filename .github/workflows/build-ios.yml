@@ -1,0 +1,61 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches:
+      - claude/bluetooth-chat-feasibility-c9qGx
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-ios:
+    name: Build unsigned iOS archive
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm install
+
+      - name: Install CocoaPods dependencies
+        working-directory: ios
+        run: pod install
+
+      # Builds an unsigned .xcarchive. No Apple Developer account needed.
+      # NOTE: unsigned builds cannot be installed on a device directly —
+      # see README for signing options (TestFlight / Ad Hoc).
+      - name: Build archive (no code signing)
+        run: |
+          xcodebuild \
+            -workspace ios/BluetoothChat.xcworkspace \
+            -scheme BluetoothChat \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/BluetoothChat.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            archive | xcpretty
+
+      - name: Package .app as zip (unsigned distributable)
+        run: |
+          APP_PATH=$(find "$RUNNER_TEMP/BluetoothChat.xcarchive" -name "*.app" | head -1)
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP_PATH" "$RUNNER_TEMP/Payload/BluetoothChat.app"
+          cd "$RUNNER_TEMP" && zip -r BluetoothChat-unsigned.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bluetooth-chat-unsigned-ipa
+          path: ${{ runner.temp }}/BluetoothChat-unsigned.ipa
+          retention-days: 14
