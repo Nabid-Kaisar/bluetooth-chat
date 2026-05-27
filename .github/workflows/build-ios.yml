@@ -21,20 +21,37 @@ jobs:
       - name: Install JS dependencies
         run: npm install
 
-      # Bootstrap Xcode project using the CLI version that ships with RN 0.76
-      - name: Bootstrap iOS Xcode project
+      # The react-native npm package ships its own template — no network needed.
+      # Copy + rename HelloWorld → BluetoothChat so pod install can find the target.
+      - name: Bootstrap iOS Xcode project from template
         run: |
-          npx @react-native-community/cli@14 init BluetoothChat \
-            --directory /tmp/rn-scaffold \
-            --skip-install \
-            --version 0.76.5
-          cp -r /tmp/rn-scaffold/ios/BluetoothChat.xcodeproj ios/
-          for f in AppDelegate.swift AppDelegate.mm LaunchScreen.storyboard; do
-            src="/tmp/rn-scaffold/ios/BluetoothChat/$f"
-            [ -f "$src" ] && cp "$src" ios/BluetoothChat/ || true
-          done
-          [ -d /tmp/rn-scaffold/ios/BluetoothChatTests ] && \
-            cp -r /tmp/rn-scaffold/ios/BluetoothChatTests ios/ || true
+          TMPL="node_modules/react-native/template"
+
+          cp -r "$TMPL/ios/HelloWorld.xcodeproj" ios/BluetoothChat.xcodeproj
+
+          # Rename the scheme file if one is bundled
+          find ios/BluetoothChat.xcodeproj -name "HelloWorld.xcscheme" \
+            -exec sh -c 'mv "$1" "$(dirname "$1")/BluetoothChat.xcscheme"' _ {} \; 2>/dev/null || true
+
+          # Replace every HelloWorld reference inside the project files
+          find ios/BluetoothChat.xcodeproj -type f \
+            | xargs sed -i '' 's/HelloWorld/BluetoothChat/g'
+
+          # Copy AppDelegate (Swift preferred, fall back to Obj-C++)
+          cp "$TMPL/ios/HelloWorld/AppDelegate.swift" ios/BluetoothChat/ 2>/dev/null || \
+          cp "$TMPL/ios/HelloWorld/AppDelegate.mm"   ios/BluetoothChat/ 2>/dev/null || true
+
+          cp "$TMPL/ios/HelloWorld/LaunchScreen.storyboard" ios/BluetoothChat/ 2>/dev/null || true
+
+          # Test target (referenced in xcodeproj; optional but avoids linker warnings)
+          if [ -d "$TMPL/ios/HelloWorldTests" ]; then
+            cp -r "$TMPL/ios/HelloWorldTests" ios/BluetoothChatTests
+            find ios/BluetoothChatTests -type f \
+              | xargs sed -i '' 's/HelloWorld/BluetoothChat/g'
+          fi
+
+          echo "✅ Xcode project bootstrapped"
+          ls ios/BluetoothChat.xcodeproj/
 
       - name: Install CocoaPods
         working-directory: ios
@@ -51,8 +68,9 @@ jobs:
             -archivePath "$RUNNER_TEMP/BluetoothChat.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            archive 2>&1 | tee /tmp/xcodebuild.log | grep -E '^(error:|warning:|Build|Compiling|Linking|Archive)' || \
-            { tail -50 /tmp/xcodebuild.log; exit 1; }
+            archive 2>&1 | tee /tmp/xbuild.log | \
+            grep -E '(error:|Build|Compiling|Linking|archive)' || \
+            { echo "=== TAIL ===" && tail -60 /tmp/xbuild.log; exit 1; }
 
       - name: Package as IPA
         run: |
