@@ -22,7 +22,7 @@ android {
 
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            // AGP auto-configures the debug keystore
         }
         release {
             minifyEnabled enableProguardInReleaseBuilds

@@ -11,15 +11,13 @@ on:
 
 jobs:
   build-ios:
-    name: Build unsigned iOS archive
+    name: Build unsigned IPA
     runs-on: macos-15
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 18
           cache: npm
@@ -27,15 +25,36 @@ jobs:
       - name: Install JS dependencies
         run: npm install
 
-      - name: Install CocoaPods dependencies
+      # react-native init generates the Xcode project we can't commit as binary via API.
+      # Using the same app name so xcodeproj paths align with our Info.plist.
+      - name: Bootstrap iOS Xcode project
+        run: |
+          npx react-native@0.76 init BluetoothChat \
+            --directory /tmp/rn-scaffold \
+            --skip-install
+
+          cp -r /tmp/rn-scaffold/ios/BluetoothChat.xcodeproj ios/
+
+          # Copy AppDelegate and LaunchScreen; keep our Info.plist (has BLE permissions)
+          for f in AppDelegate.swift AppDelegate.mm LaunchScreen.storyboard; do
+            [ -e "/tmp/rn-scaffold/ios/BluetoothChat/$f" ] && \
+              cp "/tmp/rn-scaffold/ios/BluetoothChat/$f" "ios/BluetoothChat/" || true
+          done
+
+          # Test target is referenced in xcodeproj
+          [ -d "/tmp/rn-scaffold/ios/BluetoothChatTests" ] && \
+            cp -r /tmp/rn-scaffold/ios/BluetoothChatTests ios/ || true
+
+      - name: Install CocoaPods
         working-directory: ios
         run: pod install
 
-      # Builds an unsigned .xcarchive. No Apple Developer account needed.
-      # NOTE: unsigned builds cannot be installed on a device directly —
-      # see README for signing options (TestFlight / Ad Hoc).
+      - name: Install xcpretty
+        run: gem install xcpretty --no-document
+
       - name: Build archive (no code signing)
         run: |
+          set -o pipefail
           xcodebuild \
             -workspace ios/BluetoothChat.xcworkspace \
             -scheme BluetoothChat \
@@ -46,15 +65,15 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             archive | xcpretty
 
-      - name: Package .app as zip (unsigned distributable)
+      # Package .app into Payload/*.ipa structure (standard IPA layout)
+      - name: Package as IPA
         run: |
-          APP_PATH=$(find "$RUNNER_TEMP/BluetoothChat.xcarchive" -name "*.app" | head -1)
+          APP=$(find "$RUNNER_TEMP/BluetoothChat.xcarchive" -name "*.app" | head -1)
           mkdir -p "$RUNNER_TEMP/Payload"
-          cp -R "$APP_PATH" "$RUNNER_TEMP/Payload/BluetoothChat.app"
-          cd "$RUNNER_TEMP" && zip -r BluetoothChat-unsigned.ipa Payload
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP" && zip -qr BluetoothChat-unsigned.ipa Payload/
 
-      - name: Upload IPA artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: bluetooth-chat-unsigned-ipa
           path: ${{ runner.temp }}/BluetoothChat-unsigned.ipa
