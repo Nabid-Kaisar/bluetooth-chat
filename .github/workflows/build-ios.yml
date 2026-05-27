@@ -21,43 +21,68 @@ jobs:
       - name: Install JS dependencies
         run: npm install
 
-      # The react-native npm package ships its own template — no network needed.
-      # Copy + rename HelloWorld → BluetoothChat so pod install can find the target.
       - name: Bootstrap iOS Xcode project from template
+        id: bootstrap
         run: |
+          # Template ships inside react-native package; fall back to npm pack if missing
           TMPL="node_modules/react-native/template"
+          if [ ! -d "$TMPL/ios" ]; then
+            echo "Template not in node_modules — extracting via npm pack..."
+            npm pack "react-native@0.76.5" --pack-destination /tmp/ --quiet
+            mkdir -p /tmp/rn-tmpl
+            tar xzf /tmp/react-native-0.76.5.tgz -C /tmp/rn-tmpl --strip-components=1 2>/dev/null || \
+            tar xzf /tmp/react-native-0.76.5.tgz -C /tmp/rn-tmpl
+            TMPL="/tmp/rn-tmpl/template"
+          fi
+          echo "Using template: $TMPL"
+          ls "$TMPL/ios/"
 
           cp -r "$TMPL/ios/HelloWorld.xcodeproj" ios/BluetoothChat.xcodeproj
 
-          # Rename the scheme file if one is bundled
+          # Rename scheme file
           find ios/BluetoothChat.xcodeproj -name "HelloWorld.xcscheme" \
             -exec sh -c 'mv "$1" "$(dirname "$1")/BluetoothChat.xcscheme"' _ {} \; 2>/dev/null || true
 
-          # Replace every HelloWorld reference inside the project files
-          find ios/BluetoothChat.xcodeproj -type f \
+          # Replace HelloWorld only in known text files
+          find ios/BluetoothChat.xcodeproj -type f \( -name "*.pbxproj" -o -name "*.xcscheme" \) \
             | xargs sed -i '' 's/HelloWorld/BluetoothChat/g'
 
-          # Copy AppDelegate (Swift preferred, fall back to Obj-C++)
+          # AppDelegate
           cp "$TMPL/ios/HelloWorld/AppDelegate.swift" ios/BluetoothChat/ 2>/dev/null || \
-          cp "$TMPL/ios/HelloWorld/AppDelegate.mm"   ios/BluetoothChat/ 2>/dev/null || true
+          cp "$TMPL/ios/HelloWorld/AppDelegate.mm" ios/BluetoothChat/ 2>/dev/null || \
+          { echo "ERROR: no AppDelegate found"; exit 1; }
 
           cp "$TMPL/ios/HelloWorld/LaunchScreen.storyboard" ios/BluetoothChat/ 2>/dev/null || true
 
-          # Test target (referenced in xcodeproj; optional but avoids linker warnings)
           if [ -d "$TMPL/ios/HelloWorldTests" ]; then
             cp -r "$TMPL/ios/HelloWorldTests" ios/BluetoothChatTests
-            find ios/BluetoothChatTests -type f \
-              | xargs sed -i '' 's/HelloWorld/BluetoothChat/g'
+            find ios/BluetoothChatTests -type f \( -name "*.swift" -o -name "*.m" \) \
+              | xargs sed -i '' 's/HelloWorld/BluetoothChat/g' 2>/dev/null || true
           fi
 
-          echo "✅ Xcode project bootstrapped"
+          echo "✅ Bootstrap complete"
           ls ios/BluetoothChat.xcodeproj/
+          ls ios/BluetoothChat/
+        continue-on-error: true
+
+      - name: Capture bootstrap error to summary
+        if: steps.bootstrap.outcome == 'failure'
+        run: |
+          echo "## ❌ iOS Bootstrap Failed" >> $GITHUB_STEP_SUMMARY
+          echo "node_modules/react-native contents:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ls node_modules/react-native/ >> $GITHUB_STEP_SUMMARY 2>&1 || true
+          echo '' >> $GITHUB_STEP_SUMMARY
+          ls node_modules/react-native/template/ >> $GITHUB_STEP_SUMMARY 2>&1 || echo "No template dir" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          exit 1
 
       - name: Install CocoaPods
         working-directory: ios
         run: pod install
 
       - name: Build archive (no code signing)
+        id: xcode_build
         run: |
           set -o pipefail
           xcodebuild \
@@ -68,9 +93,19 @@ jobs:
             -archivePath "$RUNNER_TEMP/BluetoothChat.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            archive 2>&1 | tee /tmp/xbuild.log | \
-            grep -E '(error:|Build|Compiling|Linking|archive)' || \
-            { echo "=== TAIL ===" && tail -60 /tmp/xbuild.log; exit 1; }
+            archive 2>&1 | tee /tmp/xbuild.log | grep -E '(error:|Build|Compiling|Linking|archive)'
+        continue-on-error: true
+
+      - name: Capture xcode error to summary
+        if: steps.xcode_build.outcome == 'failure'
+        run: |
+          echo "## ❌ Xcode Build Error" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -i 'error:' /tmp/xbuild.log | head -20 >> $GITHUB_STEP_SUMMARY || true
+          echo '' >> $GITHUB_STEP_SUMMARY
+          tail -40 /tmp/xbuild.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          exit 1
 
       - name: Package as IPA
         run: |

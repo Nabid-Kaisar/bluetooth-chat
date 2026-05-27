@@ -11,8 +11,8 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        // Explicit version avoids relying on BOM resolution in CI
-        classpath("com.android.tools.build:gradle:8.6.1")
+        // Versions are resolved through the @react-native/gradle-plugin composite build
+        classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${kotlinVersion}")
     }

@@ -26,7 +26,6 @@ jobs:
           java-version: 17
           distribution: temurin
 
-      # Download Gradle directly — avoids GitHub cache-service 400 errors
       - name: Install Gradle 8.10.2
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.10.2-bin.zip -O /tmp/gradle.zip
@@ -47,10 +46,25 @@ jobs:
           done
 
       - name: Build debug APK
+        id: gradle_build
         working-directory: android
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle.log; exit ${PIPESTATUS[0]}
+        continue-on-error: true
+
+      - name: Capture build error to summary
+        if: steps.gradle_build.outcome == 'failure'
+        run: |
+          echo "## ❌ Gradle Build Error" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -E "(error:|FAILED|Exception|Unresolved|Cannot resolve|cannot find|> Task)" /tmp/gradle.log | tail -40 >> $GITHUB_STEP_SUMMARY || true
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '--- last 50 lines ---' >> $GITHUB_STEP_SUMMARY
+          tail -50 /tmp/gradle.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          exit 1
 
       - uses: actions/upload-artifact@v4
+        if: steps.gradle_build.outcome == 'success'
         with:
           name: bluetooth-chat-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
