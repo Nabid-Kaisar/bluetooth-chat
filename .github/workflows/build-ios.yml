@@ -1,0 +1,66 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [claude/bluetooth-chat-feasibility-c9qGx, claude/bluetooth-chat-ci-fix-Xe9ph, main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-ios:
+    name: Build unsigned IPA
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install JS dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install
+
+      - name: Build archive (no code signing)
+        id: xcode_build
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace ios/BluetoothChat.xcworkspace \
+            -scheme BluetoothChat \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/BluetoothChat.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            archive 2>&1 | tee /tmp/xbuild.log
+        continue-on-error: true
+
+      - name: Capture xcode error to summary
+        if: steps.xcode_build.outcome == 'failure'
+        run: |
+          echo "## Xcode Build Error" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -i 'error:' /tmp/xbuild.log | head -40 >> $GITHUB_STEP_SUMMARY || true
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '--- last 80 lines ---' >> $GITHUB_STEP_SUMMARY
+          tail -80 /tmp/xbuild.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          exit 1
+
+      - name: Package as IPA
+        run: |
+          APP=$(find "$RUNNER_TEMP/BluetoothChat.xcarchive" -name "*.app" | head -1)
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP" && zip -qr BluetoothChat-unsigned.ipa Payload/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bluetooth-chat-unsigned-ipa
+          path: ${{ runner.temp }}/BluetoothChat-unsigned.ipa
+          retention-days: 14
