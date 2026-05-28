@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [claude/bluetooth-chat-feasibility-c9qGx, main]
+    branches: [claude/bluetooth-chat-feasibility-c9qGx, claude/bluetooth-chat-ci-fix-Xe9ph, main]
   pull_request:
     branches: [main]
 
@@ -16,50 +16,36 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
 
       - name: Install JS dependencies
-        run: npm install
+        run: npm install --no-audit --no-fund
 
       - uses: actions/setup-java@v4
         with:
           java-version: 17
           distribution: temurin
 
-      - name: Install Gradle 8.10.2
-        run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.10.2-bin.zip -O /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /opt
-          echo "/opt/gradle-8.10.2/bin" >> $GITHUB_PATH
-
       - name: Write local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
-
-      - name: Create placeholder launcher icons
-        run: |
-          ICON="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjkB6QAAAABJRU5ErkJggg=="
-          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            dir="android/app/src/main/res/mipmap-$density"
-            mkdir -p "$dir"
-            printf '%s' "$ICON" | base64 -d > "$dir/ic_launcher.png"
-            cp "$dir/ic_launcher.png" "$dir/ic_launcher_round.png"
-          done
 
       - name: Build debug APK
         id: gradle_build
         working-directory: android
-        run: gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle.log; exit ${PIPESTATUS[0]}
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle.log
         continue-on-error: true
 
       - name: Capture build error to summary
         if: steps.gradle_build.outcome == 'failure'
         run: |
-          echo "## ❌ Gradle Build Error" >> $GITHUB_STEP_SUMMARY
+          echo "## Gradle Build Error" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          grep -E "(error:|FAILED|Exception|Unresolved|Cannot resolve|cannot find|> Task)" /tmp/gradle.log | tail -40 >> $GITHUB_STEP_SUMMARY || true
+          grep -E "(error:|FAILED|Exception|Unresolved|Cannot resolve|cannot find|> Task)" /tmp/gradle.log | tail -60 >> $GITHUB_STEP_SUMMARY || true
           echo '' >> $GITHUB_STEP_SUMMARY
-          echo '--- last 50 lines ---' >> $GITHUB_STEP_SUMMARY
-          tail -50 /tmp/gradle.log >> $GITHUB_STEP_SUMMARY
+          echo '--- last 80 lines ---' >> $GITHUB_STEP_SUMMARY
+          tail -80 /tmp/gradle.log >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           exit 1
 
