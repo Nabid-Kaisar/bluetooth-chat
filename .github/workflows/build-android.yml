@@ -26,31 +26,51 @@ jobs:
           java-version: 17
           distribution: temurin
 
+      - name: Install required Android SDK components
+        run: |
+          set -e
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          echo "Pre-installed NDKs:"
+          ls "$ANDROID_HOME/ndk" 2>/dev/null || echo "  (none)"
+          echo "Pre-installed build-tools:"
+          ls "$ANDROID_HOME/build-tools" 2>/dev/null || echo "  (none)"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;26.1.10909125" \
+            "cmake;3.22.1" 2>&1 | tail -20
+
       - name: Write local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
 
       - name: Build debug APK
-        id: gradle_build
         working-directory: android
         run: |
           set -o pipefail
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle.log
-        continue-on-error: true
+          ./gradlew assembleDebug --no-daemon --stacktrace --info 2>&1 | tee /tmp/gradle.log | grep -E "(^> Task |FAILED|error:|warning:|BUILD |Exception|Caused by|Unresolved|Could not)" || true
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" != "0" ]; then
+            echo "## Gradle Build Error" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "(error:|FAILED|Exception|Caused by|Unresolved|Cannot resolve|cannot find|> Task)" /tmp/gradle.log | tail -80 >> $GITHUB_STEP_SUMMARY || true
+            echo '' >> $GITHUB_STEP_SUMMARY
+            echo '--- last 120 lines ---' >> $GITHUB_STEP_SUMMARY
+            tail -120 /tmp/gradle.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+          exit $STATUS
 
-      - name: Capture build error to summary
-        if: steps.gradle_build.outcome == 'failure'
-        run: |
-          echo "## Gradle Build Error" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          grep -E "(error:|FAILED|Exception|Unresolved|Cannot resolve|cannot find|> Task)" /tmp/gradle.log | tail -60 >> $GITHUB_STEP_SUMMARY || true
-          echo '' >> $GITHUB_STEP_SUMMARY
-          echo '--- last 80 lines ---' >> $GITHUB_STEP_SUMMARY
-          tail -80 /tmp/gradle.log >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          exit 1
+      - name: Upload full gradle log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-log
+          path: /tmp/gradle.log
+          retention-days: 7
 
       - uses: actions/upload-artifact@v4
-        if: steps.gradle_build.outcome == 'success'
+        if: success()
         with:
           name: bluetooth-chat-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
